@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.DS_Store
+Generated_Letters/
+dist/
+build/
+*.spec
+isp_cache.json

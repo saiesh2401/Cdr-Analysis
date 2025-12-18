@@ -1,0 +1,7 @@
+streamlit
+pandas
+openpyxl
+python-docx
+beautifulsoup4
+ipwhois
+watchdog
