@@ -8,7 +8,8 @@ from docx import Document
 from collections import defaultdict
 import warnings
 
-import sys
+import zipfile
+import pandas as pd
 
 # Suppress warnings
 warnings.filterwarnings("ignore")
@@ -34,6 +35,187 @@ class ISPProcessor:
         # Ensure output dir exists
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
+
+    def process_airtel_reply(self, zip_path, password_str):
+        """
+        Process an Airtel Reply Zip (Nested Zips of CSVs).
+        Returns: {
+            'hits_df': pd.DataFrame (Combined valid rows),
+            'misses': list (List of IPs/Files with no records)
+        }
+        """
+        extract_root = os.path.join(self.output_dir, "temp_reply_extract")
+        if os.path.exists(extract_root):
+             import shutil
+             shutil.rmtree(extract_root)
+        os.makedirs(extract_root)
+        
+        hits = []
+        misses = []
+        
+        try:
+            # 1. Extract Master Zip
+            password_bytes = password_str.encode("utf-8") if password_str else None
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                try:
+                    zf.extractall(path=extract_root, pwd=password_bytes)
+                except RuntimeError:
+                     return None, "Incorrect Password"
+                except Exception as e:
+                     return None, f"Extraction Error: {e}"
+
+            # 2. Iterate Extracted
+            for root, _, files in os.walk(extract_root):
+                for f in files:
+                    if f.endswith(".zip"):
+                        # Inner Zip Found (usually one per IP)
+                        inner_zip_path = os.path.join(root, f)
+                        inner_extract_dir = os.path.join(root, os.path.splitext(f)[0])
+                        
+                        # Extract Inner
+                        try:
+                            with zipfile.ZipFile(inner_zip_path, 'r') as zf_inner:
+                                # Try with password, then without
+                                try:
+                                    zf_inner.extractall(path=inner_extract_dir, pwd=password_bytes)
+                                except:
+                                    zf_inner.extractall(path=inner_extract_dir)
+                                    
+                            # Scan for CSV inside inner dir
+                            csv_found = False
+                            for sub_root, _, sub_files in os.walk(inner_extract_dir):
+                                for sub_f in sub_files:
+                                    if sub_f.endswith(".csv"):
+                                        csv_found = True
+                                        csv_full_path = os.path.join(sub_root, sub_f)
+                                        
+                                        # Parse CSV
+                                        # Airtel CSV: ~Line 7 is header.
+                                        try:
+                                            with open(csv_full_path, "rb") as ft:
+                                                lines = ft.readlines()
+                                            
+                                            # Check for No Records
+                                            # Usually data starts at line 7 (index 7) or 8
+                                            file_content_str = b"".join(lines).decode('latin1')
+                                            
+                                            if "No Records Found" in file_content_str:
+                                                misses.append(f) # Add Zip Name or IP to misses
+                                            else:
+                                                # Attempt to read as DataFrame
+                                                # Standard header is usually at row 6 (0-indexed)
+                                                # We can try to read with header=6
+                                                try:
+                                                    # Robust Header Finding
+                                                    with open(csv_full_path, "r", encoding="latin1") as f_in:
+                                                        lines = f_in.readlines()
+                                                    
+                                                    header_idx = -1
+                                                    for i, line in enumerate(lines[:20]): # Scan first 20 lines
+                                                        if "DSL_User_ID" in line:
+                                                            header_idx = i
+                                                            break
+                                                            
+                                                    if header_idx != -1:
+                                                        # Use python engine for robust parsing of quotes/dates
+                                                        try:
+                                                            df = pd.read_csv(csv_full_path, skiprows=header_idx, header=0, encoding='latin1', quotechar="'", skipinitialspace=True, on_bad_lines='skip', engine='python')
+                                                        except:
+                                                            # Fallback for older pandas or different env
+                                                            df = pd.read_csv(csv_full_path, skiprows=header_idx, header=0, encoding='latin1', quotechar="'", skipinitialspace=True, engine='python')
+
+                                                        # Filter footer artifacts
+                                                        if 'DSL_User_ID' in df.columns:
+                                                            df = df[~df['DSL_User_ID'].astype(str).str.contains("System generated", case=False, na=False)]
+                                                            
+                                                        if not df.empty:
+                                                            df['Source_File'] = f
+                                                            df['CSV_Path'] = csv_full_path
+                                                            hits.append(df)
+                                                except:
+                                                     pass
+                                        except:
+                                            pass
+                            
+                            if not csv_found:
+                                misses.append(f"{f} (No CSV)")
+
+                        except Exception:
+                            misses.append(f"{f} (Corrupt/PW)")
+                            
+            # 3. Combine Hits
+            if hits:
+                final_df = pd.concat(hits, ignore_index=True)
+            else:
+                final_df = pd.DataFrame()
+                
+            return {
+                "hits_df": final_df,
+                "misses": misses
+            }, "Success"
+
+        except Exception as e:
+             return None, f"Processing Error: {e}"
+
+
+    def process_jio_reply(self, file_path):
+        import py7zr
+        import shutil
+        import pandas as pd
+        temp_dir = os.path.join(os.getcwd(), "temp_jio_extract")
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+        os.makedirs(temp_dir)
+        
+        hits = []
+        misses = []
+        
+        try:
+            # 1. Extract 7z
+            try:
+                with py7zr.SevenZipFile(file_path, mode='r') as z:
+                    z.extractall(path=temp_dir)
+            except Exception as e:
+                return None, f"Failed to extract 7z: {str(e)}"
+                
+            # 2. Walk and Find Data
+            for root, dirs, files in os.walk(temp_dir):
+                for f in files:
+                    # Filter for interesting files
+                    if f.lower().endswith(('.csv', '.xlsx', '.xls')):
+                        file_full_path = os.path.join(root, f)
+                        try:
+                            # Read file
+                            if f.lower().endswith('.csv'):
+                                # Jio CSVs seem clean, header=0
+                                df = pd.read_csv(file_full_path, on_bad_lines='skip', encoding='latin1', low_memory=False)
+                            else:
+                                df = pd.read_excel(file_full_path)
+                                
+                            if not df.empty:
+                                df['Source_File'] = f
+                                df['CSV_Path'] = file_full_path
+                                hits.append(df)
+                            else:
+                                misses.append(f)
+                        except Exception as e:
+                            # print(f"Error reading {f}: {e}")
+                            misses.append(f)
+                            
+        except Exception as e:
+            return None, f"Processing Error: {str(e)}"
+            
+        # Combine
+        if hits:
+            final_df = pd.concat(hits, ignore_index=True)
+        else:
+            final_df = pd.DataFrame()
+            
+        return {
+            "hits_df": final_df,
+            "misses": misses
+        }, "Success"
+
 
     def _load_cache(self):
         if os.path.exists(self.cache_file):
