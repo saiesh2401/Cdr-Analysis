@@ -491,6 +491,26 @@ class ISPProcessor:
                 break
                 
         if target_table:
+            # Store the header row's border formatting only (not shading)
+            from docx.oxml import parse_xml
+            from copy import deepcopy
+            
+            header_row = target_table.rows[0]
+            # Store ONLY border formatting from header cells (not shading)
+            header_cell_borders = []
+            for cell in header_row.cells:
+                # Get the tcPr (table cell properties) element
+                tc_pr = cell._element.tcPr
+                if tc_pr is not None:
+                    # Extract only the tcBorders element (not shading)
+                    tc_borders = tc_pr.find('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tcBorders')
+                    if tc_borders is not None:
+                        header_cell_borders.append(deepcopy(tc_borders))
+                    else:
+                        header_cell_borders.append(None)
+                else:
+                    header_cell_borders.append(None)
+            
             # CLEAR SAMPLE DATA: Remove all rows except the header
             # Iterate backwards to avoid index issues
             for i in range(len(target_table.rows) - 1, 0, -1):
@@ -545,6 +565,24 @@ class ISPProcessor:
                      cells[1].text = ip
                      cells[2].text = from_dt.strftime(fmt_combined)
                      cells[3].text = to_dt.strftime(fmt_combined)
+                
+                # Apply border formatting from header to each cell
+                for idx, cell in enumerate(cells):
+                    if idx < len(header_cell_borders) and header_cell_borders[idx] is not None:
+                        # Ensure tcPr exists
+                        tc_pr = cell._element.tcPr
+                        if tc_pr is None:
+                            # Create tcPr if it doesn't exist
+                            tc_pr = parse_xml('<w:tcPr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>')
+                            cell._element.insert(0, tc_pr)
+                        
+                        # Remove existing borders if any
+                        existing_borders = tc_pr.find('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tcBorders')
+                        if existing_borders is not None:
+                            tc_pr.remove(existing_borders)
+                        
+                        # Add the copied borders from header
+                        tc_pr.append(deepcopy(header_cell_borders[idx]))
                 
             out_path = os.path.join(self.output_dir, output_name)
             doc.save(out_path)
