@@ -3,7 +3,7 @@ import pandas as pd
 import os
 import shutil
 import datetime
-from backend import ISPProcessor
+from backend import ISPProcessor, BankLetterProcessor
 
 # Set page config
 st.set_page_config(page_title="IFSO ISP Tool", page_icon="🚔", layout="wide")
@@ -455,7 +455,6 @@ with bank_tab:
     
     # Initialize Bank Letter Processor
     if 'bank_processor' not in st.session_state:
-        from backend import BankLetterProcessor
         st.session_state.bank_processor = BankLetterProcessor(output_dir="Generated_Letters")
     
     # File Upload
