@@ -480,7 +480,7 @@ with bank_tab:
             # Display sheet information
             st.subheader("📊 Transaction Summary")
             
-            col1, col2, col3, col4 = st.columns(4)
+            col1, col2, col3, col4, col5 = st.columns(5)
             
             with col1:
                 st.metric("Money Transfers", len(sheets['Money Transfer to']))
@@ -490,6 +490,8 @@ with bank_tab:
                 st.metric("ATM Withdrawals", len(sheets['Withdrawal through ATM']))
             with col4:
                 st.metric("Cheque Withdrawals", len(sheets['Cash Withdrawal through Cheque']))
+            with col5:
+                st.metric("AEPS", len(sheets['AEPS']))
             
             # Layer Detection for Sheet 1
             max_layers = processor.get_available_layers(sheets['Money Transfer to'])
@@ -499,7 +501,7 @@ with bank_tab:
             
             # Sheet Selection
             st.write("**Select Transaction Types to Process:**")
-            col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+            col_s1, col_s2, col_s3, col_s4, col_s5 = st.columns(5)
             
             with col_s1:
                 process_sheet1 = st.checkbox("Money Transfer", value=True, key="proc_s1")
@@ -509,6 +511,8 @@ with bank_tab:
                 process_sheet3 = st.checkbox("ATM", value=True, key="proc_s3")
             with col_s4:
                 process_sheet4 = st.checkbox("Cheque", value=True, key="proc_s4")
+            with col_s5:
+                process_sheet5 = st.checkbox("AEPS", value=True, key="proc_s5")
             
             # Layer Selection for Sheet 1
             if process_sheet1:
@@ -537,7 +541,7 @@ with bank_tab:
                 
                 with st.spinner("Generating bank letters..."):
                     progress_bar = st.progress(0)
-                    total_tasks = sum([process_sheet1, process_sheet2, process_sheet3, process_sheet4])
+                    total_tasks = sum([process_sheet1, process_sheet2, process_sheet3, process_sheet4, process_sheet5])
                     current_task = 0
                     
                     try:
@@ -577,6 +581,16 @@ with bank_tab:
                             st.write("📝 Processing Cheque Withdrawals...")
                             files = processor.generate_cheque_letters(
                                 sheets['Cash Withdrawal through Cheque']
+                            )
+                            all_generated_files.extend(files)
+                            current_task += 1
+                            progress_bar.progress(current_task / total_tasks)
+                        
+                        # Sheet 5: AEPS
+                        if process_sheet5:
+                            st.write("📝 Processing AEPS Withdrawals...")
+                            files = processor.generate_aeps_letters(
+                                sheets['AEPS']
                             )
                             all_generated_files.extend(files)
                             current_task += 1

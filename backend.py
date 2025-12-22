@@ -612,7 +612,8 @@ class BankLetterProcessor:
                 'Money Transfer to': pd.read_excel(file_path, sheet_name='Money Transfer to'),
                 'Transaction put on hold': pd.read_excel(file_path, sheet_name='Transaction put on hold'),
                 'Withdrawal through ATM': pd.read_excel(file_path, sheet_name='Withdrawal through ATM'),
-                'Cash Withdrawal through Cheque': pd.read_excel(file_path, sheet_name='Cash Withdrawal through Cheque')
+                'Cash Withdrawal through Cheque': pd.read_excel(file_path, sheet_name='Cash Withdrawal through Cheque'),
+                'AEPS': pd.read_excel(file_path, sheet_name='AEPS')
             }
             return sheets, None
         except Exception as e:
@@ -1050,4 +1051,100 @@ class BankLetterProcessor:
             return True
         except Exception as e:
             print(f"Error filling cheque template: {e}")
+            return False
+
+    def generate_aeps_letters(self, df, output_subdir="Sheet5_AEPS"):
+        """
+        Generate bank-wise letters for AEPS Withdrawals (AEPS sheet).
+        Returns: list of generated file paths
+        """
+        output_dir = os.path.join(self.output_dir, output_subdir)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        
+        generated_files = []
+        grouped = self.group_by_bank(df, bank_column='Action Taken By bank')
+        
+        for bank_name, transactions in grouped.items():
+            if len(transactions) == 0:
+                continue
+            
+            template_path = "bank_letters/aeps_template.docx"
+            safe_bank_name = self.sanitize_filename(bank_name)
+            output_name = f"{safe_bank_name}_AEPS.docx"
+            output_path = os.path.join(output_dir, output_name)
+            
+            success = self._fill_aeps_template(
+                template_path, 
+                bank_name, 
+                transactions, 
+                output_path
+            )
+            
+            if success:
+                generated_files.append({
+                    'path': output_path,
+                    'bank': bank_name,
+                    'count': len(transactions),
+                    'type': 'AEPS Withdrawal'
+                })
+        
+        return generated_files
+    
+    def _fill_aeps_template(self, template_path, bank_name, transactions, output_path):
+        """Fill the AEPS template with transaction data"""
+        try:
+            doc = Document(template_path)
+            
+            # Replace bank name in the document (address section and anywhere else)
+            for paragraph in doc.paragraphs:
+                if 'Punjab National Bank' in paragraph.text:
+                    paragraph.text = paragraph.text.replace('Punjab National Bank', bank_name)
+                # Also check runs
+                for run in paragraph.runs:
+                    if 'Punjab National Bank' in run.text:
+                        run.text = run.text.replace('Punjab National Bank', bank_name)
+            
+            # Find and populate the table
+            if doc.tables:
+                table = doc.tables[0]
+                
+                # Clear existing rows (keep header)
+                for i in range(len(table.rows) - 1, 0, -1):
+                    row = table.rows[i]
+                    row._element.getparent().remove(row._element)
+                
+                # Add transaction rows
+                for idx, txn in enumerate(transactions, 1):
+                    row = table.add_row()
+                    cells = row.cells
+                    
+                    # Template columns: Sl. No. | Account No. | Transaction ID | Withdrawal Date | Withdrawal Amount
+                    if len(cells) >= 5:
+                        cells[0].text = str(idx)
+                        
+                        # Column C: Account No./ (Wallet /PG/PA) Id
+                        account_no = txn.get('Account No./ (Wallet /PG/PA) Id', '')
+                        if pd.notna(account_no):
+                            cells[1].text = str(int(account_no)) if isinstance(account_no, (int, float)) else str(account_no)
+                        else:
+                            cells[1].text = ''
+                        
+                        # Column D: Transaction Id / UTR Number
+                        cells[2].text = str(txn.get('Transaction Id / UTR Number', '')) if pd.notna(txn.get('Transaction Id / UTR Number', '')) else ''
+                        
+                        # Column E: Withdrawal Date
+                        cells[3].text = str(txn.get('Withdrawal Date', '')) if pd.notna(txn.get('Withdrawal Date', '')) else ''
+                        
+                        # Column F: Withdrawal Amount
+                        amount = txn.get('Withdrawal Amount', '')
+                        if pd.notna(amount):
+                            cells[4].text = str(amount)
+                        else:
+                            cells[4].text = ''
+            
+            doc.save(output_path)
+            return True
+        except Exception as e:
+            print(f"Error filling AEPS template: {e}")
             return False
