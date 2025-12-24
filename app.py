@@ -1,8 +1,10 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import os
 import shutil
 import datetime
+import json
 from backend import ISPProcessor, BankLetterProcessor
 
 # Set page config
@@ -538,6 +540,55 @@ with bank_tab:
             # Layer Detection for Sheet 1
             max_layers = processor.get_available_layers(sheets['Money Transfer to'])
             
+            
+            st.write("---")
+            st.subheader("📝 Letter Customization")
+            
+            # Custom Subject Line
+            st.write("**Subject Line:**")
+            default_subject = "Notice to Freeze & provide details of bank accounts in the case FIR no. 201/25, U/s 318(4)/319(2)/61(2)/3(5), Dated 08/07/25, PS Special Cell (L2)"
+            custom_subject = st.text_area(
+                "Enter custom subject line for the bank letters",
+                value=default_subject,
+                height=80,
+                key="custom_subject",
+                help="This will appear as the subject line in all generated bank letters"
+            )
+            
+            # Custom Case Description
+            st.write("**Case Description:**")
+            default_message = """It is submitted that a complaint from Sh. Akhilesh Dutt has been received at IFSO/Special Cell office regarding cheating on pretext of investment through WhatsApp group "TATA CAPITAL MONEYFY". It was alleged that they were added in what's app group. The complainants were induced to invest in multiple companies through their respective bank accounts amounting to Rs.77,30,040/- 
+               During the course of investigation, it revealed that the complainant transferred the amount in below mentioned accounts."""
+            
+            custom_message = st.text_area(
+                "Enter case description/details for the bank letters",
+                value=default_message,
+                height=150,
+                key="custom_message",
+                help="This will appear in the body of all generated bank letters"
+            )
+            
+            # Custom Release Order Details (for money release letters)
+            st.write("**Release Order Details (for Money Release Letters):**")
+            default_release_order = """The Hon'ble Court of Sh. Yashdeep Chahal, Judicial Magisrate-01, Patiala House Courts, New Delhi has directed to the concerned bank manager to release the amount, whichever is available/lying in the beneficiary bank account in favor of the complainant to the below mentioned account. (order attached herewith)
+Sh. Akhilesh Dutt
+Bank Account No. 629301106296  (ICICI Bank)
+(IFSC Code : ICIC0006293) 
+Branch : Rajouri Garden, New Delhi"""
+            
+            custom_release_order = st.text_area(
+                "Enter court order and beneficiary account details",
+                value=default_release_order,
+                height=150,
+                key="custom_release_order",
+                help="This will appear in money release letters (Sheet 2: Transaction On Hold)"
+            )
+            
+            # Store in session state for use in letter generation
+            st.session_state.letter_subject = custom_subject
+            st.session_state.letter_message = custom_message
+            st.session_state.letter_release_order = custom_release_order
+            
             st.write("---")
             st.subheader("⚙️ Configuration")
             
@@ -592,7 +643,9 @@ with bank_tab:
                             st.write("📝 Processing Money Transfer transactions...")
                             files = processor.generate_layerwise_letters(
                                 sheets['Money Transfer to'], 
-                                num_layers
+                                num_layers,
+                                custom_subject=st.session_state.get('letter_subject'),
+                                custom_message=st.session_state.get('letter_message')
                             )
                             all_generated_files.extend(files)
                             current_task += 1
@@ -602,7 +655,10 @@ with bank_tab:
                         if process_sheet2:
                             st.write("📝 Processing Transaction On Hold...")
                             files = processor.generate_money_release_letters(
-                                sheets['Transaction put on hold']
+                                sheets['Transaction put on hold'],
+                                custom_subject=st.session_state.get('letter_subject'),
+                                custom_message=st.session_state.get('letter_message'),
+                                custom_release_order=st.session_state.get('letter_release_order')
                             )
                             all_generated_files.extend(files)
                             current_task += 1
@@ -612,7 +668,9 @@ with bank_tab:
                         if process_sheet3:
                             st.write("📝 Processing ATM Withdrawals...")
                             files = processor.generate_atm_letters(
-                                sheets['Withdrawal through ATM']
+                                sheets['Withdrawal through ATM'],
+                                custom_subject=st.session_state.get('letter_subject'),
+                                custom_message=st.session_state.get('letter_message')
                             )
                             all_generated_files.extend(files)
                             current_task += 1
@@ -622,7 +680,9 @@ with bank_tab:
                         if process_sheet4:
                             st.write("📝 Processing Cheque Withdrawals...")
                             files = processor.generate_cheque_letters(
-                                sheets['Cash Withdrawal through Cheque']
+                                sheets['Cash Withdrawal through Cheque'],
+                                custom_subject=st.session_state.get('letter_subject'),
+                                custom_message=st.session_state.get('letter_message')
                             )
                             all_generated_files.extend(files)
                             current_task += 1
@@ -632,7 +692,9 @@ with bank_tab:
                         if process_sheet5:
                             st.write("📝 Processing AEPS Withdrawals...")
                             files = processor.generate_aeps_letters(
-                                sheets['AEPS']
+                                sheets['AEPS'],
+                                custom_subject=st.session_state.get('letter_subject'),
+                                custom_message=st.session_state.get('letter_message')
                             )
                             all_generated_files.extend(files)
                             current_task += 1

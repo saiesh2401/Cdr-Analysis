@@ -5,6 +5,9 @@ from bs4 import BeautifulSoup
 from ipwhois import IPWhois
 import openpyxl
 from docx import Document
+from docx.shared import Pt
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from collections import defaultdict
 import warnings
 
@@ -645,6 +648,28 @@ class BankLetterProcessor:
         
         return grouped
     
+    def set_table_borders(self, table):
+        """
+        Apply borders to all cells in a table for better visibility.
+        """
+        tbl = table._tbl
+        for row in table.rows:
+            for cell in row.cells:
+                tc = cell._element
+                tcPr = tc.get_or_add_tcPr()
+                
+                # Create border elements
+                tcBorders = OxmlElement('w:tcBorders')
+                for border_name in ['top', 'left', 'bottom', 'right']:
+                    border = OxmlElement(f'w:{border_name}')
+                    border.set(qn('w:val'), 'single')
+                    border.set(qn('w:sz'), '4')  # Border size
+                    border.set(qn('w:space'), '0')
+                    border.set(qn('w:color'), '000000')  # Black color
+                    tcBorders.append(border)
+                
+                tcPr.append(tcBorders)
+    
     def sanitize_filename(self, name):
         """Clean bank name for use in filename"""
         # Remove special characters and replace spaces with underscores
@@ -653,7 +678,7 @@ class BankLetterProcessor:
         name = re.sub(r'[\s]+', '_', name)
         return name[:100]  # Limit length
     
-    def generate_layerwise_letters(self, df, num_layers, output_subdir="Sheet1_MoneyTransfer"):
+    def generate_layerwise_letters(self, df, num_layers, output_subdir="Sheet1_MoneyTransfer", custom_subject=None, custom_message=None):
         """
         Generate bank-wise letters for Money Transfer transactions (Sheet 1).
         Filters by layer number and groups by bank.
@@ -689,7 +714,9 @@ class BankLetterProcessor:
                 bank_name, 
                 transactions, 
                 output_path,
-                num_layers
+                num_layers,
+                custom_subject,
+                custom_message
             )
             
             if success:
@@ -702,7 +729,7 @@ class BankLetterProcessor:
         
         return generated_files
     
-    def generate_money_release_letters(self, df, output_subdir="Sheet2_OnHold"):
+    def generate_money_release_letters(self, df, output_subdir="Sheet2_OnHold", custom_subject=None, custom_message=None, custom_release_order=None):
         """
         Generate bank-wise letters for Transaction on Hold (Sheet 2).
         Returns: list of generated file paths
@@ -727,7 +754,10 @@ class BankLetterProcessor:
                 template_path, 
                 bank_name, 
                 transactions, 
-                output_path
+                output_path,
+                custom_subject,
+                custom_message,
+                custom_release_order
             )
             
             if success:
@@ -740,7 +770,7 @@ class BankLetterProcessor:
         
         return generated_files
     
-    def generate_atm_letters(self, df, output_subdir="Sheet3_ATM"):
+    def generate_atm_letters(self, df, output_subdir="Sheet3_ATM", custom_subject=None, custom_message=None):
         """
         Generate bank-wise letters for ATM Withdrawals (Sheet 3).
         Returns: list of generated file paths
@@ -765,7 +795,9 @@ class BankLetterProcessor:
                 template_path, 
                 bank_name, 
                 transactions, 
-                output_path
+                output_path,
+                custom_subject,
+                custom_message
             )
             
             if success:
@@ -778,7 +810,7 @@ class BankLetterProcessor:
         
         return generated_files
     
-    def generate_cheque_letters(self, df, output_subdir="Sheet4_Cheque"):
+    def generate_cheque_letters(self, df, output_subdir="Sheet4_Cheque", custom_subject=None, custom_message=None):
         """
         Generate bank-wise letters for Cheque Withdrawals (Sheet 4).
         Returns: list of generated file paths
@@ -803,7 +835,9 @@ class BankLetterProcessor:
                 template_path, 
                 bank_name, 
                 transactions, 
-                output_path
+                output_path,
+                custom_subject,
+                custom_message
             )
             
             if success:
@@ -816,20 +850,33 @@ class BankLetterProcessor:
         
         return generated_files
     
-    def _fill_layerwise_template(self, template_path, bank_name, transactions, output_path, num_layers):
+    def _fill_layerwise_template(self, template_path, bank_name, transactions, output_path, num_layers, custom_subject=None, custom_message=None):
         """Fill the bank layerwise template with transaction data"""
         try:
             doc = Document(template_path)
             
-            # Replace bank name in the document (address section and anywhere else)
+            # Replace placeholders in the document
             for paragraph in doc.paragraphs:
-                # Replace the hardcoded bank name in address section
+                # Replace bank name
                 if 'IDFC First Bank' in paragraph.text:
                     paragraph.text = paragraph.text.replace('IDFC First Bank', bank_name)
+                
+                # Replace custom subject if provided
+                if custom_subject and '{{SUBJECT}}' in paragraph.text:
+                    paragraph.text = paragraph.text.replace('{{SUBJECT}}', custom_subject)
+                
+                # Replace custom message if provided
+                if custom_message and '{{MESSAGE}}' in paragraph.text:
+                    paragraph.text = paragraph.text.replace('{{MESSAGE}}', custom_message)
+                
                 # Also check for runs within paragraphs for better replacement
                 for run in paragraph.runs:
                     if 'IDFC First Bank' in run.text:
                         run.text = run.text.replace('IDFC First Bank', bank_name)
+                    if custom_subject and '{{SUBJECT}}' in run.text:
+                        run.text = run.text.replace('{{SUBJECT}}', custom_subject)
+                    if custom_message and '{{MESSAGE}}' in run.text:
+                        run.text = run.text.replace('{{MESSAGE}}', custom_message)
             
             # Find and populate the table
             if doc.tables:
@@ -862,28 +909,51 @@ class BankLetterProcessor:
                         else:
                             cells[2].text = ifsc
             
+            # Apply borders to the table
+            if doc.tables:
+                self.set_table_borders(doc.tables[0])
+            
             doc.save(output_path)
             return True
         except Exception as e:
             print(f"Error filling layerwise template: {e}")
             return False
     
-    def _fill_money_release_template(self, template_path, bank_name, transactions, output_path):
+    def _fill_money_release_template(self, template_path, bank_name, transactions, output_path, custom_subject=None, custom_message=None, custom_release_order=None):
         """Fill the money release template with transaction data"""
         try:
             doc = Document(template_path)
             
-            # Replace bank name in the document (address section and anywhere else)
+            # Replace placeholders in the document
             for paragraph in doc.paragraphs:
-                # Replace hardcoded bank names
+                # Replace bank names
                 if 'IDFC Bank' in paragraph.text or 'IDFC First Bank' in paragraph.text:
                     paragraph.text = paragraph.text.replace('IDFC Bank', bank_name)
                     paragraph.text = paragraph.text.replace('IDFC First Bank', bank_name)
+                
+                # Replace custom subject if provided
+                if custom_subject and '{{SUBJECT}}' in paragraph.text:
+                    paragraph.text = paragraph.text.replace('{{SUBJECT}}', custom_subject)
+                
+                # Replace custom message if provided
+                if custom_message and '{{MESSAGE}}' in paragraph.text:
+                    paragraph.text = paragraph.text.replace('{{MESSAGE}}', custom_message)
+                
+                # Replace custom release order if provided
+                if custom_release_order and '{{RELEASE_ORDER}}' in paragraph.text:
+                    paragraph.text = paragraph.text.replace('{{RELEASE_ORDER}}', custom_release_order)
+                
                 # Also check runs
                 for run in paragraph.runs:
                     if 'IDFC Bank' in run.text or 'IDFC First Bank' in run.text:
                         run.text = run.text.replace('IDFC Bank', bank_name)
                         run.text = run.text.replace('IDFC First Bank', bank_name)
+                    if custom_subject and '{{SUBJECT}}' in run.text:
+                        run.text = run.text.replace('{{SUBJECT}}', custom_subject)
+                    if custom_message and '{{MESSAGE}}' in run.text:
+                        run.text = run.text.replace('{{MESSAGE}}', custom_message)
+                    if custom_release_order and '{{RELEASE_ORDER}}' in run.text:
+                        run.text = run.text.replace('{{RELEASE_ORDER}}', custom_release_order)
             
             # Find and populate the table
             if doc.tables:
@@ -899,47 +969,106 @@ class BankLetterProcessor:
                     row = table.add_row()
                     cells = row.cells
                     
-                    # Template columns: Account No | Transaction Id | Money Put on hold | Bank Name
+                    # Template columns: Sr. No. | Account No | Transaction Id | Money Put on hold
                     if len(cells) >= 4:
-                        # Column C: Account No./ (Wallet /PG/PA) Id
-                        account_no = txn.get('Account No./ (Wallet /PG/PA) Id', '')
+                        # Column 0: Serial Number
+                        cells[0].text = str(idx)
+                        
+                        # Column 1: Account No - try multiple possible column names
+                        account_no = (txn.get('Account No./ (Wallet /PG/PA) Id') or 
+                                     txn.get('Account No') or 
+                                     txn.get('Account Number') or '')
+                        if pd.notna(account_no):
+                            cells[1].text = str(int(account_no)) if isinstance(account_no, (int, float)) else str(account_no)
+                        else:
+                            cells[1].text = ''
+                        
+                        # Column 2: Transaction Id
+                        txn_id = (txn.get('Transaction Id / UTR Number') or 
+                                 txn.get('Transaction Id') or 
+                                 txn.get('UTR Number') or '')
+                        cells[2].text = str(txn_id) if pd.notna(txn_id) else ''
+                        
+                        # Column 3: Money Put on hold
+                        amount = (txn.get('Put on hold Amount') or 
+                                 txn.get('Amount') or 
+                                 txn.get('Money Put on hold') or '')
+                        if pd.notna(amount):
+                            try:
+                                cells[3].text = f"{float(amount):,.2f}" if isinstance(amount, (int, float)) else str(amount)
+                            except:
+                                cells[3].text = str(amount)
+                        else:
+                            cells[3].text = ''
+                    elif len(cells) >= 3:
+                        # Fallback for 3-column table (no serial number column in template)
+                        # Column 0: Account No
+                        account_no = (txn.get('Account No./ (Wallet /PG/PA) Id') or 
+                                     txn.get('Account No') or 
+                                     txn.get('Account Number') or '')
                         if pd.notna(account_no):
                             cells[0].text = str(int(account_no)) if isinstance(account_no, (int, float)) else str(account_no)
                         else:
                             cells[0].text = ''
                         
-                        # Column D: Transaction Id / UTR Number
-                        cells[1].text = str(txn.get('Transaction Id / UTR Number', '')) if pd.notna(txn.get('Transaction Id / UTR Number', '')) else ''
+                        # Column 1: Transaction Id
+                        txn_id = (txn.get('Transaction Id / UTR Number') or 
+                                 txn.get('Transaction Id') or 
+                                 txn.get('UTR Number') or '')
+                        cells[1].text = str(txn_id) if pd.notna(txn_id) else ''
                         
-                        # Column F: Put on hold Amount
-                        amount = txn.get('Put on hold Amount', '')
+                        # Column 2: Money Put on hold
+                        amount = (txn.get('Put on hold Amount') or 
+                                 txn.get('Amount') or 
+                                 txn.get('Money Put on hold') or '')
                         if pd.notna(amount):
-                            cells[2].text = f"{amount:,.2f}" if isinstance(amount, (int, float)) else str(amount)
+                            try:
+                                cells[2].text = f"{float(amount):,.2f}" if isinstance(amount, (int, float)) else str(amount)
+                            except:
+                                cells[2].text = str(amount)
                         else:
                             cells[2].text = ''
-                        
-                        # Column G: Action Taken By bank (Bank Name)
-                        cells[3].text = str(txn.get('Action Taken By bank', bank_name)) if pd.notna(txn.get('Action Taken By bank', '')) else bank_name
+            
+            # Apply borders to the table
+            if doc.tables:
+                self.set_table_borders(doc.tables[0])
             
             doc.save(output_path)
             return True
         except Exception as e:
             print(f"Error filling money release template: {e}")
+            print(f"Available columns in transaction data: {list(transactions[0].keys()) if len(transactions) > 0 else 'No transactions'}")
+            import traceback
+            traceback.print_exc()
             return False
     
-    def _fill_atm_template(self, template_path, bank_name, transactions, output_path):
+    def _fill_atm_template(self, template_path, bank_name, transactions, output_path, custom_subject=None, custom_message=None):
         """Fill the ATM template with transaction data"""
         try:
             doc = Document(template_path)
             
-            # Replace bank name in the document (address section and anywhere else)
+            # Replace placeholders in the document
             for paragraph in doc.paragraphs:
+                # Replace bank name
                 if 'Bandhan Bank' in paragraph.text:
                     paragraph.text = paragraph.text.replace('Bandhan Bank', bank_name)
+                
+                # Replace custom subject if provided
+                if custom_subject and '{{SUBJECT}}' in paragraph.text:
+                    paragraph.text = paragraph.text.replace('{{SUBJECT}}', custom_subject)
+                
+                # Replace custom message if provided
+                if custom_message and '{{MESSAGE}}' in paragraph.text:
+                    paragraph.text = paragraph.text.replace('{{MESSAGE}}', custom_message)
+                
                 # Also check runs
                 for run in paragraph.runs:
                     if 'Bandhan Bank' in run.text:
                         run.text = run.text.replace('Bandhan Bank', bank_name)
+                    if custom_subject and '{{SUBJECT}}' in run.text:
+                        run.text = run.text.replace('{{SUBJECT}}', custom_subject)
+                    if custom_message and '{{MESSAGE}}' in run.text:
+                        run.text = run.text.replace('{{MESSAGE}}', custom_message)
             
             # Find and populate the table
             if doc.tables:
@@ -982,25 +1111,43 @@ class BankLetterProcessor:
                         else:
                             cells[4].text = ''
             
+            # Apply borders to the table
+            if doc.tables:
+                self.set_table_borders(doc.tables[0])
+            
             doc.save(output_path)
             return True
         except Exception as e:
             print(f"Error filling ATM template: {e}")
             return False
     
-    def _fill_cheque_template(self, template_path, bank_name, transactions, output_path):
+    def _fill_cheque_template(self, template_path, bank_name, transactions, output_path, custom_subject=None, custom_message=None):
         """Fill the cheque withdrawal template with transaction data"""
         try:
             doc = Document(template_path)
             
-            # Replace bank name in the document (address section and anywhere else)
+            # Replace placeholders in the document
             for paragraph in doc.paragraphs:
+                # Replace bank name
                 if 'Punjab National Bank' in paragraph.text:
                     paragraph.text = paragraph.text.replace('Punjab National Bank', bank_name)
+                
+                # Replace custom subject if provided
+                if custom_subject and '{{SUBJECT}}' in paragraph.text:
+                    paragraph.text = paragraph.text.replace('{{SUBJECT}}', custom_subject)
+                
+                # Replace custom message if provided
+                if custom_message and '{{MESSAGE}}' in paragraph.text:
+                    paragraph.text = paragraph.text.replace('{{MESSAGE}}', custom_message)
+                
                 # Also check runs
                 for run in paragraph.runs:
                     if 'Punjab National Bank' in run.text:
                         run.text = run.text.replace('Punjab National Bank', bank_name)
+                    if custom_subject and '{{SUBJECT}}' in run.text:
+                        run.text = run.text.replace('{{SUBJECT}}', custom_subject)
+                    if custom_message and '{{MESSAGE}}' in run.text:
+                        run.text = run.text.replace('{{MESSAGE}}', custom_message)
             
             # Find and populate the table
             if doc.tables:
@@ -1047,13 +1194,17 @@ class BankLetterProcessor:
                         else:
                             cells[5].text = ''
             
+            # Apply borders to the table
+            if doc.tables:
+                self.set_table_borders(doc.tables[0])
+            
             doc.save(output_path)
             return True
         except Exception as e:
             print(f"Error filling cheque template: {e}")
             return False
 
-    def generate_aeps_letters(self, df, output_subdir="Sheet5_AEPS"):
+    def generate_aeps_letters(self, df, output_subdir="Sheet5_AEPS", custom_subject=None, custom_message=None):
         """
         Generate bank-wise letters for AEPS Withdrawals (AEPS sheet).
         Returns: list of generated file paths
@@ -1078,7 +1229,9 @@ class BankLetterProcessor:
                 template_path, 
                 bank_name, 
                 transactions, 
-                output_path
+                output_path,
+                custom_subject,
+                custom_message
             )
             
             if success:
@@ -1091,19 +1244,33 @@ class BankLetterProcessor:
         
         return generated_files
     
-    def _fill_aeps_template(self, template_path, bank_name, transactions, output_path):
+    def _fill_aeps_template(self, template_path, bank_name, transactions, output_path, custom_subject=None, custom_message=None):
         """Fill the AEPS template with transaction data"""
         try:
             doc = Document(template_path)
             
-            # Replace bank name in the document (address section and anywhere else)
+            # Replace placeholders in the document
             for paragraph in doc.paragraphs:
+                # Replace bank name
                 if 'Punjab National Bank' in paragraph.text:
                     paragraph.text = paragraph.text.replace('Punjab National Bank', bank_name)
+                
+                # Replace custom subject if provided
+                if custom_subject and '{{SUBJECT}}' in paragraph.text:
+                    paragraph.text = paragraph.text.replace('{{SUBJECT}}', custom_subject)
+                
+                # Replace custom message if provided
+                if custom_message and '{{MESSAGE}}' in paragraph.text:
+                    paragraph.text = paragraph.text.replace('{{MESSAGE}}', custom_message)
+                
                 # Also check runs
                 for run in paragraph.runs:
                     if 'Punjab National Bank' in run.text:
                         run.text = run.text.replace('Punjab National Bank', bank_name)
+                    if custom_subject and '{{SUBJECT}}' in run.text:
+                        run.text = run.text.replace('{{SUBJECT}}', custom_subject)
+                    if custom_message and '{{MESSAGE}}' in run.text:
+                        run.text = run.text.replace('{{MESSAGE}}', custom_message)
             
             # Find and populate the table
             if doc.tables:
@@ -1142,6 +1309,10 @@ class BankLetterProcessor:
                             cells[4].text = str(amount)
                         else:
                             cells[4].text = ''
+            
+            # Apply borders to the table
+            if doc.tables:
+                self.set_table_borders(doc.tables[0])
             
             doc.save(output_path)
             return True
