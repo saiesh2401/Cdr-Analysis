@@ -171,6 +171,48 @@ with gen_tab:
             st.write("---")
             st.info(f"**Suspect:** {metadata.get('name')} | **Email:** {metadata.get('email')}")
             
+            # Download All as ZIP button
+            st.write("**Download Options:**")
+            col_zip, col_spacer = st.columns([1, 3])
+            
+            with col_zip:
+                # Create ZIP file with all generated files
+                import zipfile
+                import io
+                from datetime import datetime
+                
+                zip_buffer = io.BytesIO()
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                suspect_name = res.get("suspect_name", "Unknown")
+                
+                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                    for file_path in res["generated_files"]:
+                        if os.path.exists(file_path):
+                            file_name = os.path.basename(file_path)
+                            # Organize by ISP
+                            if "JIO" in file_name:
+                                zip_path = f"JIO/{file_name}"
+                            elif "AIRTEL" in file_name:
+                                zip_path = f"AIRTEL/{file_name}"
+                            elif "VI" in file_name:
+                                zip_path = f"VI/{file_name}"
+                            else:
+                                zip_path = file_name
+                            zip_file.write(file_path, zip_path)
+                
+                zip_buffer.seek(0)
+                
+                st.download_button(
+                    label="📦 Download All as ZIP",
+                    data=zip_buffer,
+                    file_name=f"{suspect_name}_ISP_Letters_{timestamp}.zip",
+                    mime="application/zip",
+                    key="download_all_isp_letters",
+                    type="primary"
+                )
+            
+            st.write("---")
+            
             # UI Organization: Tabs
             tab_letters, tab_data = st.tabs(["📄 Request Letters (.docx)", "📊 IP Data Sheets (.xlsx)"])
             
@@ -618,6 +660,43 @@ with bank_tab:
                     if txn_type not in files_by_type:
                         files_by_type[txn_type] = []
                     files_by_type[txn_type].append(file_info)
+                
+                # Download All as ZIP button
+                st.write("**Download Options:**")
+                col_zip, col_spacer = st.columns([1, 3])
+                
+                with col_zip:
+                    # Create ZIP file with all generated letters
+                    import zipfile
+                    import io
+                    from datetime import datetime
+                    
+                    zip_buffer = io.BytesIO()
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    
+                    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                        for file_info in st.session_state.bank_generated_files:
+                            if os.path.exists(file_info['path']):
+                                # Add file to ZIP with organized folder structure
+                                file_name = os.path.basename(file_info['path'])
+                                txn_type = file_info['type']
+                                # Create a clean folder name
+                                folder_name = txn_type.replace(" ", "_")
+                                zip_path = f"{folder_name}/{file_name}"
+                                zip_file.write(file_info['path'], zip_path)
+                    
+                    zip_buffer.seek(0)
+                    
+                    st.download_button(
+                        label="📦 Download All as ZIP",
+                        data=zip_buffer,
+                        file_name=f"Bank_Letters_{timestamp}.zip",
+                        mime="application/zip",
+                        key="download_all_bank_letters",
+                        type="primary"
+                    )
+                
+                st.write("---")
                 
                 # Display in tabs by transaction type
                 if len(files_by_type) > 0:
