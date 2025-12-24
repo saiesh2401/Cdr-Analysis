@@ -497,6 +497,12 @@ with bank_tab:
     st.header("🏦 Bank Transaction Letter Generator")
     st.info("Upload the transaction Excel file to generate bank-specific letters for different transaction types.")
     
+    # Display backend version for debugging
+    if hasattr(BankLetterProcessor, 'VERSION'):
+        st.caption(f"Backend Version: {BankLetterProcessor.VERSION}")
+    else:
+        st.warning("⚠️ Running OLD backend version - please refresh or contact admin")
+    
     # Initialize Bank Letter Processor
     if 'bank_processor' not in st.session_state:
         st.session_state.bank_processor = BankLetterProcessor(output_dir="Generated_Letters")

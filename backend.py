@@ -600,6 +600,8 @@ class BankLetterProcessor:
     for different transaction types (Money Transfer, On Hold, ATM, Cheque).
     """
     
+    VERSION = "2.1.0"  # Version with custom_subject and custom_message support
+    
     def __init__(self, output_dir="Generated_Letters"):
         self.output_dir = output_dir
         if not os.path.exists(self.output_dir):
