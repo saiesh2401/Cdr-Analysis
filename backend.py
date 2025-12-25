@@ -121,11 +121,12 @@ class ISPProcessor:
                                                             
                                                     if header_idx != -1:
                                                         # Use python engine for robust parsing of quotes/dates
+                                                        # Read all columns as strings to prevent Arrow serialization errors
                                                         try:
-                                                            df = pd.read_csv(csv_full_path, skiprows=header_idx, header=0, encoding='latin1', quotechar="'", skipinitialspace=True, on_bad_lines='skip', engine='python')
+                                                            df = pd.read_csv(csv_full_path, skiprows=header_idx, header=0, encoding='latin1', quotechar="'", skipinitialspace=True, on_bad_lines='skip', engine='python', dtype=str)
                                                         except:
                                                             # Fallback for older pandas or different env
-                                                            df = pd.read_csv(csv_full_path, skiprows=header_idx, header=0, encoding='latin1', quotechar="'", skipinitialspace=True, engine='python')
+                                                            df = pd.read_csv(csv_full_path, skiprows=header_idx, header=0, encoding='latin1', quotechar="'", skipinitialspace=True, engine='python', dtype=str)
 
                                                         # Filter footer artifacts
                                                         if 'DSL_User_ID' in df.columns:
@@ -191,9 +192,10 @@ class ISPProcessor:
                             # Read file
                             if f.lower().endswith('.csv'):
                                 # Jio CSVs seem clean, header=0
-                                df = pd.read_csv(file_full_path, on_bad_lines='skip', encoding='latin1', low_memory=False)
+                                # Read all columns as strings to prevent Arrow serialization errors
+                                df = pd.read_csv(file_full_path, on_bad_lines='skip', encoding='latin1', low_memory=False, dtype=str)
                             else:
-                                df = pd.read_excel(file_full_path)
+                                df = pd.read_excel(file_full_path, dtype=str)
                                 
                             if not df.empty:
                                 df['Source_File'] = f

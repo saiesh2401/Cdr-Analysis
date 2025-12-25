@@ -5,6 +5,7 @@ import os
 import shutil
 import datetime
 import json
+import gc
 from backend import ISPProcessor, BankLetterProcessor
 
 # Set page config
@@ -30,6 +31,87 @@ if not st.session_state.authenticated:
     st.stop()
 # ----------------------
 
+# --- PAGINATION HELPER ---
+def render_pagination(df, page_key, page_size=10000, render_controls=True):
+    """
+    Render pagination controls and return the current page slice of the dataframe.
+    
+    Args:
+        df: Full dataframe to paginate
+        page_key: Unique key for this pagination instance (e.g., 'airtel_page', 'jio_page')
+        page_size: Number of rows per page (default 10000)
+        render_controls: Whether to render the UI controls (default True)
+    
+    Returns:
+        Tuple of (paginated_df, start_row, end_row, total_rows, current_page, total_pages)
+    """
+    # Initialize page state
+    if page_key not in st.session_state:
+        st.session_state[page_key] = 0
+    
+    total_rows = len(df)
+    total_pages = max(1, (total_rows - 1) // page_size + 1)
+    
+    # Ensure current page is valid
+    if st.session_state[page_key] >= total_pages:
+        st.session_state[page_key] = total_pages - 1
+    if st.session_state[page_key] < 0:
+        st.session_state[page_key] = 0
+    
+    current_page = st.session_state[page_key]
+    start_idx = current_page * page_size
+    end_idx = min(start_idx + page_size, total_rows)
+    
+    # Get current page slice
+    page_df = df.iloc[start_idx:end_idx]
+    
+    # Only render controls if requested
+    if render_controls:
+        # Render pagination controls
+        col1, col2, col3, col4, col5 = st.columns([1, 1, 2, 1, 1])
+        
+        with col1:
+            if st.button("⏮️ First", key=f"{page_key}_first", disabled=(current_page == 0)):
+                st.session_state[page_key] = 0
+                st.rerun()
+        
+        with col2:
+            if st.button("⬅️ Prev", key=f"{page_key}_prev", disabled=(current_page == 0)):
+                st.session_state[page_key] -= 1
+                st.rerun()
+        
+        with col3:
+            st.markdown(f"**Page {current_page + 1} of {total_pages}**")
+            st.caption(f"Showing rows {start_idx + 1:,} - {end_idx:,} of {total_rows:,}")
+        
+        with col4:
+            if st.button("Next ➡️", key=f"{page_key}_next", disabled=(current_page >= total_pages - 1)):
+                st.session_state[page_key] += 1
+                st.rerun()
+        
+        with col5:
+            if st.button("Last ⏭️", key=f"{page_key}_last", disabled=(current_page >= total_pages - 1)):
+                st.session_state[page_key] = total_pages - 1
+                st.rerun()
+        
+        # Jump to page
+        if total_pages > 1:
+            jump_page = st.number_input(
+                "Jump to page:",
+                min_value=1,
+                max_value=total_pages,
+                value=current_page + 1,
+                step=1,
+                key=f"{page_key}_jump"
+            )
+            if jump_page - 1 != current_page:
+                st.session_state[page_key] = jump_page - 1
+                st.rerun()
+    
+    return page_df, start_idx + 1, end_idx, total_rows, current_page + 1, total_pages
+
+# ----------------------
+
 st.title("🚔 IFSO ISP Letter Generator")
 
 # Logout Button
@@ -37,6 +119,26 @@ with st.sidebar:
     st.write(f"Logged in as: **vikram@delhi.com**")
     if st.button("Logout"):
         st.session_state.authenticated = False
+        st.rerun()
+    
+    st.write("---")
+    st.subheader("🧹 Memory Management")
+    st.caption("Clear memory if app becomes slow after processing large files")
+    
+    if st.button("🗑️ Clear Memory", type="secondary"):
+        # Clear large data from session state
+        keys_to_clear = []
+        for key in st.session_state.keys():
+            if key not in ['authenticated', 'processor', 'bank_processor']:
+                keys_to_clear.append(key)
+        
+        for key in keys_to_clear:
+            del st.session_state[key]
+        
+        # Force garbage collection
+        gc.collect()
+        
+        st.success("✅ Memory cleared! App should be faster now.")
         st.rerun()
 
 st.markdown("Automated tool for IFSO Special Cell.")
@@ -311,7 +413,24 @@ with reply_tab:
         reply_file = st.file_uploader("Upload Airtel Zip", type=['zip'], key="reply_up_airtel")
         reply_pass = st.text_input("Zip Password", value="18Imc", type="password", key="reply_pass_airtel")
         
-        if reply_file and st.button("Analyze Airtel"):
+        
+        col_analyze, col_reset = st.columns([1, 1])
+        
+        with col_analyze:
+            analyze_btn = st.button("🔍 Analyze Airtel", key="analyze_airtel_btn", type="primary")
+        
+        with col_reset:
+            if st.button("🔄 Reset", key="reset_airtel_btn"):
+                # Clear Airtel-specific session state
+                if 'airtel_results' in st.session_state:
+                    del st.session_state['airtel_results']
+                if 'airtel_page' in st.session_state:
+                    del st.session_state['airtel_page']
+                gc.collect()
+                st.success("✅ Airtel analysis reset!")
+                st.rerun()
+        
+        if reply_file and analyze_btn:
             reply_path = "temp_airtel.zip"
             with open(reply_path, "wb") as f:
                 f.write(reply_file.getbuffer())
@@ -335,8 +454,31 @@ with reply_tab:
                     # Show Hits
                     if not hits_df.empty:
                         st.subheader("✅ Valid Data Found")
+                        
+                        # Show summary statistics
+                        total_rows = len(hits_df)
+                        st.info(f"📊 **Total Records Found:** {total_rows:,} rows")
+                        
+                        # Prepare display dataframe
                         display_df = hits_df.drop(columns=["CSV_Path"], errors="ignore")
-                        st.dataframe(display_df, use_container_width=True, height=500)
+                        
+                        # Use pagination for large datasets
+                        if total_rows > 10000:
+                            st.write("---")
+                            st.subheader("📄 Paginated Data View")
+                            
+                            # Render pagination controls and get current page
+                            page_df, start_row, end_row, total, current_page, total_pages = render_pagination(
+                                display_df, 
+                                'airtel_page', 
+                                page_size=10000
+                            )
+                            
+                            # Display current page
+                            st.dataframe(page_df, width='stretch', height=500)
+                        else:
+                            # For small datasets, show all data
+                            st.dataframe(display_df, width='stretch', height=500)
                         
                         # Evidence Downloads
                         st.subheader("📂 Raw Evidence Files")
@@ -380,7 +522,7 @@ with reply_tab:
                                                 # Filter footer
                                                 if 'DSL_User_ID' in sub_df.columns:
                                                     sub_df = sub_df[~sub_df['DSL_User_ID'].astype(str).str.contains("System generated", case=False, na=False)]
-                                                st.dataframe(sub_df, use_container_width=True)
+                                                st.dataframe(sub_df, width='stretch')
                                             else:
                                                 st.warning("No standard Airtel header found.")
                                                 st.text("".join(lines[:20]))
@@ -400,6 +542,11 @@ with reply_tab:
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             key="dl_airtel_comb"
                         )
+                        
+                        # Clean up large dataframe from memory
+                        del hits_df, display_df, buffer
+                        gc.collect()
+                        
                     else:
                         st.warning("No valid data rows found in this file.")
                         
@@ -416,7 +563,24 @@ with reply_tab:
         
         jio_file = st.file_uploader("Upload Jio .7z", type=['7z'], key="reply_up_jio")
         
-        if jio_file and st.button("Analyze Jio"):
+        
+        col_analyze, col_reset = st.columns([1, 1])
+        
+        with col_analyze:
+            analyze_btn = st.button("🔍 Analyze Jio", key="analyze_jio_btn", type="primary")
+        
+        with col_reset:
+            if st.button("🔄 Reset", key="reset_jio_btn"):
+                # Clear Jio-specific session state
+                if 'jio_results' in st.session_state:
+                    del st.session_state['jio_results']
+                if 'jio_page' in st.session_state:
+                    del st.session_state['jio_page']
+                gc.collect()
+                st.success("✅ Jio analysis reset!")
+                st.rerun()
+        
+        if jio_file and analyze_btn:
             jio_path = "temp_jio.7z"
             with open(jio_path, "wb") as f:
                 f.write(jio_file.getbuffer())
@@ -439,8 +603,31 @@ with reply_tab:
                     
                     if not hits_df.empty:
                         st.subheader("✅ Valid Data Found")
+                        
+                        # Show summary statistics
+                        total_rows = len(hits_df)
+                        st.info(f"📊 **Total Records Found:** {total_rows:,} rows")
+                        
+                        # Prepare display dataframe
                         display_df = hits_df.drop(columns=["CSV_Path"], errors="ignore")
-                        st.dataframe(display_df, use_container_width=True, height=500)
+                        
+                        # Use pagination for large datasets
+                        if total_rows > 10000:
+                            st.write("---")
+                            st.subheader("📄 Paginated Data View")
+                            
+                            # Render pagination controls and get current page
+                            page_df, start_row, end_row, total, current_page, total_pages = render_pagination(
+                                display_df, 
+                                'jio_page', 
+                                page_size=10000
+                            )
+                            
+                            # Display current page
+                            st.dataframe(page_df, width='stretch', height=500)
+                        else:
+                            # For small datasets, show all data
+                            st.dataframe(display_df, width='stretch', height=500)
                         
                         st.subheader("📂 Raw Evidence Files")
                         if 'CSV_Path' in hits_df.columns:
@@ -465,8 +652,9 @@ with reply_tab:
                                     with st.expander(f"👁️ View Content: {bname}"):
                                         try:
                                             # Jio is simpler, just read csv
-                                            sub_df = pd.read_csv(fpath, on_bad_lines='skip', encoding='latin1', low_memory=False)
-                                            st.dataframe(sub_df, use_container_width=True)
+                                            # Read all columns as strings to prevent Arrow serialization errors
+                                            sub_df = pd.read_csv(fpath, on_bad_lines='skip', encoding='latin1', low_memory=False, dtype=str)
+                                            st.dataframe(sub_df, width='stretch')
                                         except Exception as e:
                                             st.error(f"Error previewing: {e}")
 
@@ -483,6 +671,11 @@ with reply_tab:
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             key="dl_jio_comb"
                         )
+                        
+                        # Clean up large dataframe from memory
+                        del hits_df, display_df, buffer
+                        gc.collect()
+                        
                     else:
                          st.warning("No valid data rows found.")
                          
