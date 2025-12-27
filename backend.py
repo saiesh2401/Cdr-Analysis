@@ -222,6 +222,117 @@ class ISPProcessor:
         }, "Success"
 
 
+    def process_vi_reply(self, file_path):
+        """
+        Process a VI (Vodafone Idea) Reply Zip file containing CSV data.
+        Returns: {
+            'total_rows': int,
+            'output_file': str (path to combined Excel),
+            'sample_data': DataFrame (first 100 rows),
+            'columns': list,
+            'misses': list
+        }
+        """
+        import tempfile
+        import shutil
+        
+        temp_dir = os.path.join(self.output_dir, "temp_vi_extract")
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+        os.makedirs(temp_dir)
+        
+        # Create temporary Excel output file
+        temp_output = tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.xlsx', dir=self.output_dir)
+        output_path = temp_output.name
+        temp_output.close()
+        
+        total_rows = 0
+        misses = []
+        sample_data = None
+        columns = []
+        all_chunks = []
+        
+        try:
+            # 1. Extract Zip (no password for VI)
+            try:
+                with zipfile.ZipFile(file_path, 'r') as zf:
+                    zf.extractall(path=temp_dir)
+            except Exception as e:
+                return None, f"Failed to extract zip: {str(e)}"
+            
+            # 2. Find and process CSV files
+            for root, dirs, files in os.walk(temp_dir):
+                for f in files:
+                    if f.lower().endswith('.csv'):
+                        file_full_path = os.path.join(root, f)
+                        try:
+                            # VI CSV has metadata header (11 lines) before column headers
+                            # Line 1: "VIL Call Data Records"
+                            # Lines 2-10: Metadata (PRIVIP, Report Type, dates, etc.)
+                            # Line 11: Blank
+                            # Line 12: Column headers
+                            # Lines 13+: Data
+                            
+                            # Process in chunks
+                            chunk_iter = pd.read_csv(
+                                file_full_path,
+                                skiprows=11,  # Skip metadata header
+                                chunksize=10000,
+                                on_bad_lines='skip',
+                                encoding='utf-8',
+                                low_memory=False,
+                                dtype=str
+                            )
+                            
+                            file_has_data = False
+                            for chunk in chunk_iter:
+                                if not chunk.empty:
+                                    file_has_data = True
+                                    chunk['Source_File'] = f
+                                    chunk['CSV_Path'] = file_full_path
+                                    
+                                    # Save sample from first chunk
+                                    if sample_data is None:
+                                        sample_data = chunk.head(100).copy()
+                                        columns = list(chunk.columns)
+                                    
+                                    # Collect chunk for Excel writing
+                                    all_chunks.append(chunk)
+                                    total_rows += len(chunk)
+                                    
+                                    # Free memory every 50k rows
+                                    if total_rows % 50000 == 0:
+                                        import gc
+                                        gc.collect()
+                            
+                            if not file_has_data:
+                                misses.append(f)
+                                
+                        except Exception as e:
+                            misses.append(f"{f} (Error: {str(e)})")
+            
+            # Write all chunks to Excel file
+            if all_chunks:
+                combined_df = pd.concat(all_chunks, ignore_index=True)
+                combined_df.to_excel(output_path, index=False, engine='openpyxl')
+                del combined_df
+                import gc
+                gc.collect()
+            
+        except Exception as e:
+            return None, f"Processing Error: {str(e)}"
+        
+        # Return summary
+        return {
+            "total_rows": total_rows,
+            "output_file": output_path,
+            "sample_data": sample_data,
+            "columns": columns,
+            "misses": misses
+        }, "Success"
+
+
+
     def _load_cache(self):
         if os.path.exists(self.cache_file):
             try:

@@ -401,7 +401,7 @@ with reply_tab:
     st.header("🔍 Reply Parsing Tool")
     st.info("Use this tool to extract raw IP data from ISP Reply files (Zip/7z).")
     
-    col_airtel, col_jio = st.columns(2)
+    col_airtel, col_jio, col_vi = st.columns(3)
     
     # -----------------------------------------------------------
     # AIRTEL LOGIC (LEFT COLUMN)
@@ -682,6 +682,93 @@ with reply_tab:
                     if misses:
                         with st.expander("See Missed Files"):
                             st.write(misses)
+
+    # -----------------------------------------------------------
+    # VI LOGIC (RIGHT COLUMN)
+    # -----------------------------------------------------------
+    with col_vi:
+        st.subheader("🟢 VI Reply Analysis")
+        st.write("Upload the **zipped reply** from VI.")
+        
+        vi_file = st.file_uploader("Upload VI Zip", type=['zip'], key="reply_up_vi")
+        
+        
+        col_analyze, col_reset = st.columns([1, 1])
+        
+        with col_analyze:
+            analyze_btn = st.button("🔍 Analyze VI", key="analyze_vi_btn", type="primary")
+        
+        with col_reset:
+            if st.button("🔄 Reset", key="reset_vi_btn"):
+                # Clear VI-specific session state
+                if 'vi_results' in st.session_state:
+                    del st.session_state['vi_results']
+                if 'vi_page' in st.session_state:
+                    del st.session_state['vi_page']
+                gc.collect()
+                st.success("✅ VI analysis reset!")
+                st.rerun()
+        
+        if vi_file and analyze_btn:
+            vi_path = "temp_vi.zip"
+            with open(vi_path, "wb") as f:
+                f.write(vi_file.getbuffer())
+                
+            with st.spinner("Extracting and Analyzing VI Data..."):
+                processor = st.session_state.processor
+                results_dict, msg = processor.process_vi_reply(vi_path)
+                
+                if results_dict is None:
+                    st.error(msg)
+                else:
+                    st.success("Analysis Complete!")
+                    
+                    total_rows = results_dict['total_rows']
+                    output_file = results_dict['output_file']
+                    sample_data = results_dict['sample_data']
+                    misses = results_dict['misses']
+                    
+                    c1, c2 = st.columns(2)
+                    c1.metric(label="📊 Total Records", value=f"{total_rows:,}")
+                    c2.metric(label="⚠️ Skipped Files", value=len(misses))
+                    
+                    if total_rows > 0:
+                        st.subheader("✅ Data Processing Complete")
+                        
+                        # Show summary info
+                        st.info(f"""
+                        **Processing Summary:**
+                        - Total records found: **{total_rows:,}** rows
+                        - Output file size: **{os.path.getsize(output_file) / (1024*1024):.1f} MB** (Excel format)
+                        - Files processed successfully
+                        """)
+                        
+                        # Show sample preview
+                        if sample_data is not None and not sample_data.empty:
+                            st.subheader("📋 Sample Preview (First 100 Rows)")
+                            display_sample = sample_data.drop(columns=["CSV_Path"], errors="ignore")
+                            st.dataframe(display_sample, width='stretch', height=400)
+                        
+                        # Download button for full Excel file
+                        st.subheader("📥 Download Complete Results")
+                        with open(output_file, "rb") as f:
+                            st.download_button(
+                                label=f"📥 Download Full Excel ({total_rows:,} rows)",
+                                data=f,
+                                file_name="VI_Analysis_Complete.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key="dl_vi_full"
+                            )
+                        
+                        st.caption("💡 The full dataset has been saved as an Excel file for download. Excel format is 5-10x smaller than CSV!")
+                        
+                    else:
+                         st.warning("No valid data rows found.")
+                         
+                    if misses:
+                        with st.expander("See Skipped Files"):
+                            st.write(misses)
+
 
 # ==========================================
 # TAB 3: BANK LETTERS (Excel -> Bank Letters)
