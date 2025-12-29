@@ -559,9 +559,9 @@ with reply_tab:
     # -----------------------------------------------------------
     with col_jio:
         st.subheader("🔵 Jio Reply Analysis")
-        st.write("Upload the **.7z reply** from Jio.")
+        st.write("Upload the **.7z or .zip reply** from Jio.")
         
-        jio_file = st.file_uploader("Upload Jio .7z", type=['7z'], key="reply_up_jio")
+        jio_file = st.file_uploader("Upload Jio .7z or .zip", type=['7z', 'zip'], key="reply_up_jio")
         
         
         col_analyze, col_reset = st.columns([1, 1])
@@ -581,7 +581,9 @@ with reply_tab:
                 st.rerun()
         
         if jio_file and analyze_btn:
-            jio_path = "temp_jio.7z"
+            # Preserve the original file extension (.7z or .zip)
+            file_ext = os.path.splitext(jio_file.name)[1]
+            jio_path = f"temp_jio{file_ext}"
             with open(jio_path, "wb") as f:
                 f.write(jio_file.getbuffer())
                 

@@ -163,9 +163,13 @@ class ISPProcessor:
 
 
     def process_jio_reply(self, file_path):
-        import py7zr
+        """
+        Process Jio Reply files in either .7z or .zip format.
+        Automatically detects format and extracts accordingly.
+        """
         import shutil
         import pandas as pd
+        
         temp_dir = os.path.join(os.getcwd(), "temp_jio_extract")
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir)
@@ -175,12 +179,28 @@ class ISPProcessor:
         misses = []
         
         try:
-            # 1. Extract 7z
-            try:
-                with py7zr.SevenZipFile(file_path, mode='r') as z:
-                    z.extractall(path=temp_dir)
-            except Exception as e:
-                return None, f"Failed to extract 7z: {str(e)}"
+            # 1. Detect file format and extract accordingly
+            file_ext = os.path.splitext(file_path)[1].lower()
+            
+            if file_ext == '.7z':
+                # Extract 7z file
+                try:
+                    import py7zr
+                    with py7zr.SevenZipFile(file_path, mode='r') as z:
+                        z.extractall(path=temp_dir)
+                except Exception as e:
+                    return None, f"Failed to extract 7z: {str(e)}"
+            
+            elif file_ext == '.zip':
+                # Extract zip file
+                try:
+                    with zipfile.ZipFile(file_path, 'r') as z:
+                        z.extractall(path=temp_dir)
+                except Exception as e:
+                    return None, f"Failed to extract zip: {str(e)}"
+            
+            else:
+                return None, f"Unsupported file format: {file_ext}. Only .7z and .zip are supported."
                 
             # 2. Walk and Find Data
             for root, dirs, files in os.walk(temp_dir):
